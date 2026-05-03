@@ -1,0 +1,258 @@
+<Project Sdk="Microsoft.Build.Traversal">
+  <PropertyGroup>
+    <RootFsDirHost>$(ROOTFS_DIR)</RootFsDirHost>
+    <RootFsDirHost Condition="'$(ROOTFS_DIR_HOST)' != ''">$(ROOTFS_DIR_HOST)</RootFsDirHost>
+    <RootFsDirTarget>$(ROOTFS_DIR)</RootFsDirTarget>
+    <RootFsDirTarget Condition="'$(ROOTFS_DIR_TARGET)' != ''">$(ROOTFS_DIR_TARGET)</RootFsDirTarget>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <MonoLLVMHostOS Condition="'$([System.Runtime.InteropServices.RuntimeInformation]::IsOSPlatform($([System.Runtime.InteropServices.OSPlatform]::Linux)))' == 'true'">linux</MonoLLVMHostOS>
+    <MonoLLVMHostOS Condition="'$([System.Runtime.InteropServices.RuntimeInformation]::IsOSPlatform($([System.Runtime.InteropServices.OSPlatform]::OSX)))' == 'true'">osx</MonoLLVMHostOS>
+    <MonoLLVMHostOS Condition="'$(OS)' == 'Windows_NT'">win</MonoLLVMHostOS>
+    <MonoLLVMTargetOS>$(BuildOSRid)</MonoLLVMTargetOS>
+    <MonoLLVMTargetOS Condition="Exists('$(RootFsDirTarget)/lib/ld-musl-aarch64.so.1') or Exists('$(RootFsDirTarget)/lib/ld-musl-x86_64.so.1')">linux-musl</MonoLLVMTargetOS>
+    <MonoLLVMTargetOSPrefix Condition="'$(MonoLLVMHostOS)' != '$(MonoLLVMTargetOS)'">$(MonoLLVMTargetOS)-</MonoLLVMTargetOSPrefix>
+    <MonoLLVMSDKVersion Condition="'$(MonoLLVMTargetOS)' == 'linux'">$(runtimelinuxx64MicrosoftNETCoreRuntimeMonoLLVMSdkVersion)</MonoLLVMSDKVersion>
+    <MonoLLVMSDKVersion Condition="'$(MonoLLVMTargetOS)' == 'linux-musl'">$(runtimelinuxmuslx64MicrosoftNETCoreRuntimeMonoLLVMSdkVersion)</MonoLLVMSDKVersion>
+    <MonoLLVMToolsVersion Condition="'$(MonoLLVMTargetOS)' == 'linux'">$(runtimelinuxx64MicrosoftNETCoreRuntimeMonoLLVMToolsVersion)</MonoLLVMToolsVersion>
+    <MonoLLVMToolsVersion Condition="'$(MonoLLVMTargetOS)' == 'linux-musl'">$(runtimelinuxmuslx64MicrosoftNETCoreRuntimeMonoLLVMToolsVersion)</MonoLLVMToolsVersion>
+  </PropertyGroup>
+
+  <ItemGroup Condition="'$(BuildOS)' == 'Linux'">
+    <PackageReference Include="runtime.$(MonoLLVMTargetOS)-$(TargetArchitecture).Microsoft.NETCore.Runtime.Mono.LLVM.Tools"
+                      Version="$(MonoLLVMToolsVersion)"
+                      PackageArch="$(TargetArchitecture)"
+                      Condition="'$(TargetArchitecture)' != ''" />
+    <PackageReference Include="runtime.$(MonoLLVMTargetOS)-$(TargetArchitecture).Microsoft.NETCore.Runtime.Mono.LLVM.Sdk"
+                      Version="$(MonoLLVMSDKVersion)"
+                      PackageArch="$(TargetArchitecture)"
+                      Condition="'$(TargetArchitecture)' != ''" />
+    <PackageReference Include="runtime.$(MonoLLVMHostOS)-$(BuildArchitecture).Microsoft.NETCore.Runtime.Mono.LLVM.Tools"
+                      Version="$(MonoLLVMToolsVersion)"
+                      PackageArch="$(BuildArchitecture)"
+                      Condition="'$(BuildArchitecture)' != ''" />
+    <PackageReference Include="runtime.$(MonoLLVMHostOS)-$(BuildArchitecture).Microsoft.NETCore.Runtime.Mono.LLVM.Sdk"
+                      Version="$(MonoLLVMSDKVersion)"
+                      PackageArch="$(BuildArchitecture)"
+                      Condition="'$(BuildArchitecture)' != ''" />
+    <_PackageReferenceDeduplicated Include="@(PackageReference->Distinct())" />
+    <PackageReference Remove="@(PackageReference)" />
+    <PackageReference Include="@(_PackageReferenceDeduplicated->Distinct())" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="runtime.$(BuildOSRid)-$(BuildArchitecture).Microsoft.NETCore.Runtime.Wasm.Python.Transport"
+                      Version="$(runtimeosxarm64MicrosoftNETCoreRuntimeWasmPythonTransportVersion)"
+                      Condition="'$(BuildOS)' != 'linux'"/>
+  </ItemGroup>
+
+  <Target Name="CopyPythonToTree" BeforeTargets="Build" Condition="!Exists('$(PythonDir)\$(BuildOS)-$(BuildArchitecture)\.emsdk_version') and '$(BuildOS)' != 'linux'">
+    <Makedir Directories="$(PythonDir)" />
+    <ItemGroup>
+      <PythonFiles Include="$(NuGetPackageRoot)\$([System.String]::Copy(%(PackageReference.Identity)).ToLowerInvariant())\%(PackageReference.Version)\tools\**"
+                 Condition="$([System.String]::Copy(%(PackageReference.Identity)).Contains('Microsoft.NETCore.Runtime.Wasm.Python')) == 'true'" />
+    </ItemGroup>
+    <Copy SourceFiles="@(PythonFiles)" DestinationFolder="$(PythonDir)\%(RecursiveDir)">
+      <Output TaskParameter="DestinationFiles" ItemName="FileWrites"/>
+    </Copy>
+  </Target>
+
+  <Target Name="ReallyBuildWindows" AfterTargets="CopyPythonToTree" Condition="'$(BuildOS)' == 'Windows_NT'">
+    <PropertyGroup>
+      <PythonPrefixedPath>$(PythonDir)$(BuildOS)-$(BuildArchitecture)\;$(PATH)</PythonPrefixedPath>
+      <VcBuildCommand>.\vcbuild.bat</VcBuildCommand>
+      <VcBuildCommand Condition="'$(Configuration)' == 'Release'" >$(VcBuildCommand) release</VcBuildCommand>
+      <VcBuildCommand Condition="'$(Configuration)' != 'Release'" >$(VcBuildCommand) debug</VcBuildCommand>
+      <VcBuildCommand>$(VcBuildCommand) $(TargetArchitecture)</VcBuildCommand>
+      <VcBuildCommand>$(VcBuildCommand) openssl-no-asm</VcBuildCommand>
+      <VcBuildCommand>$(VcBuildCommand) small-icu</VcBuildCommand>
+      <VcBuildCommand>$(VcBuildCommand) static</VcBuildCommand>
+      <VcBuildCommand>$(VcBuildCommand) vs2022</VcBuildCommand>
+    </PropertyGroup>
+    <Message Importance="High" Text="** Running $(VcBuildCommand)" />
+    <Exec Command="$(VcBuildCommand)"
+      IgnoreStandardErrorWarningFormat="true"
+      EnvironmentVariables="PATH=$([MSBuild]::Escape($(PythonPrefixedPath)))" />
+  </Target>
+
+  <Target Name="LayoutNodeWindows" AfterTargets="ReallyBuildWindows" Condition="'$(BuildOS)' == 'Windows_NT'">
+    <ItemGroup>
+      <NodeFiles Include="$(NodeBuildDir)**" />
+      <NodeFiles Include="$(ProjectDir)deps\npm\bin\np*.*" />
+      <NodeFiles Include="$(ProjectDir)tools\msvs\nodevars.*" />
+      <NodeFiles Include="$(ProjectDir)tools\msvs\install_tools\*.*" />
+      <NodeFiles Include="$(ProjectDir)CHANGELOG.md" />
+      <NodeFiles Include="$(ProjectDir)LICENSE" />
+      <NodeFiles Include="$(ProjectDir)README.md" />
+      <NodeFiles Include="$(ProjectDir)src\res\node_etw_provider.man" />
+      <NodeFiles Remove="$(ProjectDir)deps\npm\bin\np*-cli.js" />
+      <NodeFiles Remove="$(NodeBuildDir)bytecode_*.*" />
+      <NodeFiles Remove="$(NodeBuildDir)mksnapshot.*" />
+      <NodeFiles Remove="$(NodeBuildDir)node_mksnapshot.*" />
+      <NodeFiles Remove="$(NodeBuildDir)gen-regexp-special-case.*" />
+      <NodeFiles Remove="$(NodeBuildDir)genccode.*" />
+      <NodeFiles Remove="$(NodeBuildDir)genrb.*" />
+      <NodeFiles Remove="$(NodeBuildDir)iculslocs.*" />
+      <NodeFiles Remove="$(NodeBuildDir)icupkg.*" />
+      <NodeFiles Remove="$(NodeBuildDir)*_host.*" />
+      <NodeFiles Remove="$(NodeBuildDir)openssl*.*" />
+      <NodeFiles Remove="$(NodeBuildDir)overlapped*.*" />
+      <NodeFiles Remove="$(NodeBuildDir)torque.*" />
+      <NodeFiles Remove="$(NodeBuildDir)obj\**" />
+      <NodeFiles Remove="$(NodeBuildDir)lib\**" />
+      <NodeFiles Remove="$(NodeBuildDir)*test*.*" />
+      <NodeFiles Remove="$(NodeBuildDir)mkcodecache*.*" />
+      <NodeFiles Remove="$(NodeBuildDir)node.xlf\**" />
+      <NodeFiles Remove="$(NodeBuildDir)node.exp" />
+      <NodeFiles Remove="$(NodeBuildDir)node.iobj" />
+      <NodeFiles Remove="$(NodeBuildDir)node.ipdb" />
+      <NodeFiles Remove="$(NodeBuildDir)node.lib" />
+      <NodeFiles Remove="$(NodeBuildDir)node.map" />
+      <NodeFiles Remove="$(NodeBuildDir)node.pdb" />
+      <NpmFiles Include="$(ProjectDir)deps\npm\**" />
+      <NpmTestDirs Include="$([System.IO.Directory]::GetDirectories('$(ProjectDir)deps\npm\', 'test', SearchOption.AllDirectories))" />
+      <NpmFiles Remove="%(NpmTestDirs.Identity)\**" />
+    </ItemGroup>
+    <Copy SourceFiles="@(NodeFiles)"
+      DestinationFiles="@(NodeFiles->'$(NodeInstallDir)\bin\%(RecursiveDir)%(Filename)%(Extension)')" />
+    <Copy SourceFiles="@(NpmFiles)"
+      DestinationFiles="@(NpmFiles->'$(NodeInstallDir)\bin\node_modules\npm\%(RecursiveDir)%(Filename)%(Extension)')" />
+  </Target>
+
+  <Target Name="CopyLLVMToTree" BeforeTargets="ReallyBuildUnix" Condition="'$(BuildOS)' == 'Linux'">
+    <ItemGroup>
+      <LLVMHostFiles Include="$(NuGetPackageRoot)\$([System.String]::Copy(%(PackageReference.Identity)).ToLowerInvariant())\%(PackageReference.Version)\tools\$(MonoLLVMHostOS)-%(PackageReference.PackageArch)\**"
+                 FileArch="%(PackageReference.PackageArch)" />
+      <LLVMTargetFiles Include="$(NuGetPackageRoot)\$([System.String]::Copy(%(PackageReference.Identity)).ToLowerInvariant())\%(PackageReference.Version)\tools\$(MonoLLVMTargetOS)-%(PackageReference.PackageArch)\**"
+                 FileArch="%(PackageReference.PackageArch)" />
+    </ItemGroup>
+    <Copy SourceFiles="@(LLVMHostFiles)" DestinationFolder="$(MonoLLVMDir)\%(LLVMHostFiles.FileArch)\%(RecursiveDir)">
+      <Output TaskParameter="DestinationFiles" ItemName="FileWrites"/>
+    </Copy>
+    <Copy SourceFiles="@(LLVMTargetFiles)" DestinationFolder="$(MonoLLVMDir)\$(MonoLLVMTargetOSPrefix)%(LLVMTargetFiles.FileArch)\%(RecursiveDir)">
+      <Output TaskParameter="DestinationFiles" ItemName="FileWrites"/>
+    </Copy>
+  </Target>
+
+  <Target Name="ReallyBuildUnix" AfterTargets="CopyPythonToTree" Condition="'$(BuildOS)' != 'Windows_NT'">
+    <PropertyGroup>
+      <PythonPrefixedPath>$(PythonDir)$(BuildOS)-$(BuildArchitecture)/bin:$(PATH)</PythonPrefixedPath>
+      <ClangBinDir Condition="'$(ClangBinDir)' == ''">/usr/bin/</ClangBinDir>
+      <ObjCopy>$(ClangBinDir)/llvm-objcopy</ObjCopy>
+    </PropertyGroup>
+    <PropertyGroup>
+      <ConfigureFlags Condition="'$(Configuration)' != 'Release'">$(ConfigureFlags) --debug</ConfigureFlags>
+      <ConfigureFlags>$(ConfigureFlags) --cross-compiling</ConfigureFlags>
+      <ConfigureFlags>$(ConfigureFlags) --dest-cpu=$(TargetArchitecture)</ConfigureFlags>
+      <ConfigureFlags>$(ConfigureFlags) --with-intl=small-icu</ConfigureFlags>
+      <ConfigureFlags>$(ConfigureFlags) --openssl-no-asm</ConfigureFlags>
+      <ConfigureFlags>$(ConfigureFlags) --prefix=/</ConfigureFlags>
+      <ConfigureFlags Condition="'$(BuildOS)' == 'OSX'">$(ConfigureFlags) --dest-os=mac</ConfigureFlags>
+      <ConfigureFlags Condition="'$(BuildOS)' == 'Linux'">$(ConfigureFlags) --dest-os=linux</ConfigureFlags>
+      <GypEnvironment>$(GypEnvironment) target_arch=$(TargetArchitecture)</GypEnvironment>
+      <GypEnvironment>$(GypEnvironment) v8_target_arch=$(TargetArchitecture)</GypEnvironment>
+      <GypEnvironment>$(GypEnvironment) llvmhostdir=$([MSBuild]::NormalizePath('$(MonoLLVMDir)\$(BuildArchitecture)'))</GypEnvironment>
+      <GypEnvironment>$(GypEnvironment) llvmtargetdir=$([MSBuild]::NormalizePath('$(MonoLLVMDir)\$(MonoLLVMTargetOSPrefix)$(TargetArchitecture)'))</GypEnvironment>
+      <HostTriple Condition="'$(BuildOS)' == 'Linux' and '$(BuildArchitecture)' == 'x64'">-target x86_64-linux-gnu</HostTriple>
+      <HostTriple Condition="'$(BuildOS)' == 'Linux' and '$(BuildArchitecture)' == 'arm64'">-target aarch64-linux-gnu</HostTriple>
+      <TargetTriple Condition="'$(BuildOS)' == 'Linux' and '$(TargetArchitecture)' == 'x64'">-target x86_64-linux-gnu</TargetTriple>
+      <TargetTriple Condition="'$(BuildOS)' == 'Linux' and '$(TargetArchitecture)' == 'arm64'">-target aarch64-linux-gnu</TargetTriple>
+      <TargetTriple Condition="'$(BuildOS)' == 'Linux' and '$(TargetArchitecture)' == 'x64' and '$(MonoLLVMTargetOS)' == 'linux-musl'">-target x86_64-alpine-linux-musl</TargetTriple>
+      <TargetTriple Condition="'$(BuildOS)' == 'Linux' and '$(TargetArchitecture)' == 'arm64' and '$(MonoLLVMTargetOS)' == 'linux-musl'">-target aarch64-alpine-linux-musl</TargetTriple>
+      <ConfigureEnvironment>$(ConfigureEnvironment) CC="$(ClangBinDir)clang $(TargetTriple)"</ConfigureEnvironment>
+      <ConfigureEnvironment>$(ConfigureEnvironment) CC_host="$(ClangBinDir)clang $(HostTriple)"</ConfigureEnvironment>
+      <ConfigureEnvironment>$(ConfigureEnvironment) AR=$(ClangBinDir)llvm-ar</ConfigureEnvironment>
+      <ConfigureEnvironment>$(ConfigureEnvironment) AR_host=$(ClangBinDir)llvm-ar</ConfigureEnvironment>
+      <ConfigureEnvironment>$(ConfigureEnvironment) CXX="$(ClangBinDir)clang++ $(TargetTriple)"</ConfigureEnvironment>
+      <ConfigureEnvironment>$(ConfigureEnvironment) CXX_host="$(ClangBinDir)clang++ $(HostTriple)"</ConfigureEnvironment>
+      <CFlags Condition="'$(BuildOS)' == 'Linux'">$(CFlags) --gcc-toolchain=$(RootFsDirTarget)/usr/ --sysroot=$(RootFsDirTarget)/</CFlags>
+      <CFlags Condition="'$(BuildOS)' == 'OSX' and '$(TargetArchitecture)' == 'x64'">-arch x86_64</CFlags>
+      <CFlags Condition="'$(BuildOS)' == 'OSX' and '$(TargetArchitecture)' == 'arm64'">-arch arm64</CFlags>
+      <CFlagsHost Condition="'$(BuildOS)' == 'Linux'">$(CFlagsHost) --gcc-toolchain=$(RootFsDirHost)/usr/ --sysroot=$(RootFsDirHost)/</CFlagsHost>
+      <LDFlags Condition="'$(BuildOS)' == 'Linux'">$(TargetTriple) --gcc-toolchain=$(RootFsDirTarget)/usr/ --sysroot=$(RootFsDirTarget)/</LDFlags>
+      <LDFlags Condition="'$(BuildOS)' == 'OSX' and '$(TargetArchitecture)' == 'x64'">-arch x86_64</LDFlags>
+      <LDFlags Condition="'$(BuildOS)' == 'OSX' and '$(TargetArchitecture)' == 'arm64'">-arch arm64</LDFlags>
+      <LDFlagsHost Condition="'$(BuildOS)' == 'Linux' and '$(TargetArchitecture)' == 'x64'">-target x86_64-linux-gnu</LDFlagsHost>
+      <LDFlagsHost Condition="'$(BuildOS)' == 'Linux' and '$(TargetArchitecture)' == 'arm64'">-target aarch64-linux-gnu</LDFlagsHost>
+      <LDFlagsHost Condition="'$(BuildOS)' == 'Linux'">$(LDFlagsHost) --gcc-toolchain=$(RootFsDirHost)/usr/ --sysroot=$(RootFsDirHost)/</LDFlagsHost>
+      <LDFlagsHost>$(LDFlagsHost) -Wl,-rpath,$([MSBuild]::NormalizePath('$(MonoLLVMDir)\$(BuildArchitecture)\lib'))</LDFlagsHost>
+      <CXXFlags>$(CFlags)</CXXFlags>
+      <CXXFlags Condition="'$(BuildOS)' == 'Linux'">$(CXXFlags) -I$([MSBuild]::NormalizePath('$(MonoLLVMDir)\$(MonoLLVMTargetOSPrefix)$(TargetArchitecture)\include\c++\v1')) -L$([MSBuild]::NormalizePath('$(MonoLLVMDir)\$(MonoLLVMTargetOSPrefix)$(TargetArchitecture)\lib')) -lc++ -stdlib=libc++</CXXFlags>
+      <CXXFlagsHost>$(CFlagsHost)</CXXFlagsHost>
+      <CXXFlagsHost Condition="'$(BuildOS)' == 'Linux'">$(CXXFlags) -I$([MSBuild]::NormalizePath('$(MonoLLVMDir)\$(BuildArchitecture)\include\c++\v1')) -L$([MSBuild]::NormalizePath('$(MonoLLVMDir)\$(BuildArchitecture)\lib')) -lc++ -stdlib=libc++ -Wl,-rpath,$([MSBuild]::NormalizePath('$(MonoLLVMDir)\$(BuildArchitecture)\lib'))</CXXFlagsHost>
+      <ConfigureEnvironment Condition="'$(BuildOS)' == 'Linux'">$(ConfigureEnvironment) GYP_DEFINES="$(GypEnvironment)"</ConfigureEnvironment>
+      <ConfigureCommand>PATH=$(PythonPrefixedPath) $(ConfigureEnvironment) ./configure $(ConfigureFlags)</ConfigureCommand>
+      <MakeCommand>PATH=$(PythonPrefixedPath) PREFIX=/ CFLAGS=%22$(CFlags)%22 LDFLAGS=%22$(LDFlags)%22 CXXFLAGS=%22$(CXXFlags)%22 make -j$([System.Environment]::ProcessorCount)</MakeCommand>
+      <MakeInstallCommand>PATH=$(PythonPrefixedPath) PREFIX=/ DESTDIR=$(NodeInstallDir) CFLAGS=%22$(CFlags)%22 LDFLAGS=%22$(LDFlags)%22 CXXFLAGS=%22$(CXXFlags)%22 make install</MakeInstallCommand>
+    </PropertyGroup>
+    <Message Importance="High" Text="** Running $(ConfigureCommand)" />
+    <Exec Command="$(ConfigureCommand)"
+      IgnoreStandardErrorWarningFormat="true" />
+    <Message Importance="High" Text="** Running $(MakeCommand)" />
+    <Exec Command="$(MakeCommand)"
+      IgnoreStandardErrorWarningFormat="true" />
+    <Message Importance="High" Text="** Running $(MakeInstallCommand)" />
+    <Exec Command="$(MakeInstallCommand)"
+      IgnoreStandardErrorWarningFormat="true" />
+  </Target>
+
+  <Target Name="LayoutNodeUnix" AfterTargets="ReallyBuildUnix" Condition="'$(BuildOS)' != 'Windows_NT'">
+    <ItemGroup>
+      <NodeFiles Include="$(ProjectDir)CHANGELOG.md" />
+      <NodeFiles Include="$(ProjectDir)LICENSE" />
+      <NodeFiles Include="$(ProjectDir)README.md" />
+    </ItemGroup>
+    <Copy SourceFiles="@(NodeFiles)"
+      DestinationFiles="@(NodeFiles->'$(NodeInstallDir)\%(RecursiveDir)%(Filename)%(Extension)')" />
+    <Copy SourceFiles="$(MonoLLVMDir)\$(MonoLLVMTargetOSPrefix)$(TargetArchitecture)\lib\libc++abi.so.1;$(MonoLLVMDir)\$(MonoLLVMTargetOSPrefix)$(TargetArchitecture)\lib\libc++.so.1"
+      DestinationFolder="$(NodeInstallDir)\bin"
+      Condition="'$(BuildOS)' == 'Linux'" />
+    <ItemGroup>
+      <NodeToStrip Include="$(NodeInstallDir)\bin\node" />
+    </ItemGroup>
+    
+    <!-- OSX stripping -->
+    <Message Importance="High" Text="** Running dsymutil -flat %(NodeToStrip.FullPath)" Condition="'$(BuildOS)' == 'OSX'" />
+    <Exec IgnoreStandardErrorWarningFormat="true"
+      Command="dsymutil -flat %(NodeToStrip.FullPath)"
+      Condition="'$(BuildOS)' == 'OSX'" />
+    <Message Importance="High" Text="** Running strip -no_code_signature_warning -S %(NodeToStrip.FullPath)" Condition="'$(BuildOS)' == 'OSX'" />
+    <Exec IgnoreStandardErrorWarningFormat="true"
+      Command="strip -no_code_signature_warning -S %(NodeToStrip.FullPath)"
+      Condition="'$(BuildOS)' == 'OSX'" />
+    <Message Importance="High" Text="** Running codesign -f -s - %(NodeToStrip.FullPath)" Condition="'$(BuildOS)' == 'OSX'" />
+    <Exec IgnoreStandardErrorWarningFormat="true"
+      Command="codesign -f -s - %(NodeToStrip.FullPath)"
+      Condition="'$(BuildOS)' == 'OSX'" />
+    
+    <!-- Linux stripping -->
+    <Message Importance="High" Text="** Running $(ObjCopy) --only-keep-debug %(NodeToStrip.FullPath) %(NodeToStrip.FullPath).dbg" Condition="'$(BuildOS)' == 'Linux'" />
+    <Exec IgnoreStandardErrorWarningFormat="true"
+      Command="$(ObjCopy) --only-keep-debug %(NodeToStrip.FullPath) %(NodeToStrip.FullPath).dbg"
+      Condition="'$(BuildOS)' == 'Linux'" />
+    <Message Importance="High" Text="** Running $(ObjCopy) --strip-debug --strip-unneeded %(NodeToStrip.FullPath)" Condition="'$(BuildOS)' == 'Linux'" />
+    <Exec IgnoreStandardErrorWarningFormat="true"
+      Command="$(ObjCopy) --strip-debug --strip-unneeded %(NodeToStrip.FullPath)"
+      Condition="'$(BuildOS)' == 'Linux'" />
+    <Message Importance="High" Text="** Running $(ObjCopy) --add-gnu-debuglink=%(NodeToStrip.FullPath).dbg %(NodeToStrip.FullPath)" Condition="'$(BuildOS)' == 'Linux'" />
+    <Exec IgnoreStandardErrorWarningFormat="true"
+      Command="$(ObjCopy) --add-gnu-debuglink=%(NodeToStrip.FullPath).dbg %(NodeToStrip.FullPath)"
+      Condition="'$(BuildOS)' == 'Linux'" />
+  </Target>
+
+  <Target Name="WriteVersionFile" AfterTargets="LayoutNodeWindows;LayoutNodeUnix">
+    <PropertyGroup>
+      <NodeEmsdkVersion>node-$(VersionPrefix)-dotnet</NodeEmsdkVersion>
+    </PropertyGroup>
+    <WriteLinesToFile File="$(NodeInstallDir)\.emsdk_version"
+      Overwrite="true"
+      Lines="$(NodeEmsdkVersion)" />
+  </Target>
+
+  <Target Name="Build" DependsOnTargets="ReallyBuild" />
+  <Target Name="Test" />
+  <Target Name="ReallyPack" BeforeTargets="Pack">
+    <MSBuild Projects="eng/nuget/packages.builds" Targets="Build" />
+  </Target>
+</Project>
